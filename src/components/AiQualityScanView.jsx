@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { ShieldCheck, AlertTriangle, Clock, RefreshCw, Zap, ArrowRight, CheckCircle2, ChevronRight, Eye, Thermometer } from 'lucide-react';
-
-export default function AiQualityScanView({ item, onProceedToMatching, onProceedToSpoiledRouting, onBackToDashboard }) {
+import { doc, updateDoc } from 'firebase/firestore';
+import { db } from '../config/firebase';
+import { BATCH_STATUS } from '../constants/statusEnum';
+export default function AiQualityScanView({ item, onProceedToMatching, onProceedToSpoiledRouting, onBackToDashboard, onScanComplete }) {
   const [isScanning, setIsScanning] = useState(true);
   const [scanProgress, setScanProgress] = useState(0);
 
@@ -17,6 +19,8 @@ export default function AiQualityScanView({ item, onProceedToMatching, onProceed
         if (prev >= 100) {
           clearInterval(interval);
           setIsScanning(false);
+          // ─── Write scan result to Firestore ───
+          writeScanResultToFirestore();
           return 100;
         }
         return prev + 25;
@@ -24,6 +28,28 @@ export default function AiQualityScanView({ item, onProceedToMatching, onProceed
     }, 350);
     return () => clearInterval(interval);
   }, [item]);
+
+  // Write AI verdict to Firestore after scan completes
+  const writeScanResultToFirestore = async () => {
+    if (!item?.firestoreId) return; // Skip for demo items without Firestore IDs
+
+    const newStatus = isEdible ? BATCH_STATUS.PENDING_NGO : BATCH_STATUS.SPOILED_PENDING;
+    try {
+      await updateDoc(doc(db, 'surplus_batches', item.firestoreId), {
+        status: newStatus,
+        verdict: isEdible ? 'EDIBLE' : 'SPOILED',
+        freshnessScore: score,
+      });
+      console.log(`[AnnaSetu] Batch ${item.id} → ${newStatus} written to Firestore`);
+    } catch (err) {
+      console.error('Failed to write scan result to Firestore:', err);
+    }
+
+    // Notify parent (BusinessDashboard) so it can start the 30-min timer
+    if (onScanComplete) {
+      onScanComplete(item, isEdible ? 'EDIBLE' : 'SPOILED');
+    }
+  };
 
   return (
     <div className="max-w-4xl mx-auto space-y-8">

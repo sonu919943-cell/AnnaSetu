@@ -3,7 +3,9 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
+    // ═══════════════════════════════════════════════════════════════
     // Helper functions for role checks
+    // ═══════════════════════════════════════════════════════════════
     function isSuperAdmin() {
       return request.auth != null && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'super_admin';
     }
@@ -17,7 +19,18 @@ service cloud.firestore {
       return request.auth != null && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'fertilizer';
     }
 
+    // ═══════════════════════════════════════════════════════════════
+    // 30-Minute NGO-Exclusive Window Check
+    // Math: request.time < resource.data.createdAt + 30 minutes
+    // This is evaluated on Google's servers — tamper-proof
+    // ═══════════════════════════════════════════════════════════════
+    function isWithinNgoWindow() {
+      return request.time < resource.data.createdAt + duration.value(30, 'm');
+    }
+
+    // ═══════════════════════════════════════════════════════════════
     // User profiles
+    // ═══════════════════════════════════════════════════════════════
     match /users/{userId} {
       // Users can read their own profile, super admins can read all
       allow read: if request.auth.uid == userId || isSuperAdmin();
@@ -25,20 +38,50 @@ service cloud.firestore {
       allow write: if isSuperAdmin(); 
     }
 
-    // Surplus Batches
+    // ═══════════════════════════════════════════════════════════════
+    // Surplus Batches — Accept-or-Dump Protocol
+    // ═══════════════════════════════════════════════════════════════
     match /surplus_batches/{batchId} {
-      // Anyone logged in can read batches (or restrict to involved parties)
+      // Anyone logged in can read batches
       allow read: if request.auth != null;
       
       // Business can create new surplus batches
       allow create: if isBusiness();
       
-      // Business can update status (e.g. dispatched)
-      // NGOs can update to 'Accepted' if it's edible
-      // Fertilizer companies can update to 'Accepted' if it's spoiled
-      allow update: if isBusiness() || 
-                       (isNgo() && resource.data.verdict == 'EDIBLE') ||
-                       (isFertilizer() && resource.data.verdict == 'SPOILED');
+      // ─── UPDATE RULES (Time-Gated Accept-or-Dump) ───
+      allow update: if
+        // 1. Business can always update their own batches (status promotion, scan results)
+        isBusiness()
+
+        // 2. NGO can accept EDIBLE food ONLY within the 30-minute window
+        || (isNgo()
+            && resource.data.verdict == 'EDIBLE'
+            && resource.data.status == 'PENDING_NGO'
+            && isWithinNgoWindow())
+
+        // 3. NGO can verify delivery (scan confirmation)
+        || (isNgo()
+            && resource.data.status == 'ACCEPTED_EN_ROUTE'
+            && request.resource.data.status == 'ACCEPTED_AND_VERIFIED')
+
+        // 4. Fertilizer can accept SPOILED food (direct route, no time gate)
+        || (isFertilizer()
+            && resource.data.verdict == 'SPOILED'
+            && resource.data.status == 'SPOILED_PENDING')
+
+        // 5. Fertilizer can accept EDIBLE food ONLY after 30-min window expires
+        || (isFertilizer()
+            && resource.data.verdict == 'EDIBLE'
+            && resource.data.status == 'PENDING_FERTILIZER'
+            && !isWithinNgoWindow())
+
+        // 6. Fertilizer can verify delivery (scan confirmation)
+        || (isFertilizer()
+            && resource.data.status == 'ACCEPTED_EN_ROUTE'
+            && request.resource.data.status == 'ACCEPTED_AND_VERIFIED')
+
+        // 7. Super admin can always update (override/audit)
+        || isSuperAdmin();
                        
       // Only super admins can delete audit trails
       allow delete: if isSuperAdmin();

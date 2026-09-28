@@ -3,6 +3,9 @@ import { MapPin, Navigation, Zap, Clock, ShieldCheck, CheckCircle2, QrCode, Phon
 import { MOCK_NGOS } from '../data/mockData';
 import RouteMap from './RouteMap';
 import QrHandoffModal from './QrHandoffModal';
+import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { db } from '../config/firebase';
+import { BATCH_STATUS } from '../constants/statusEnum';
 
 export default function NgoMatchingView({ item, onConfirmDispatch, onBackToDashboard }) {
   const [selectedNgo, setSelectedNgo] = useState(MOCK_NGOS[0]);
@@ -27,9 +30,25 @@ export default function NgoMatchingView({ item, onConfirmDispatch, onBackToDashb
   };
 
   // Step timeline handler for pickup progress
-  const handleStartPickup = (ngo = selectedNgo) => {
+  const handleStartPickup = async (ngo = selectedNgo) => {
     setSelectedNgo(ngo);
     setPickupStatus('ACCEPTED');
+
+    // ─── Write dispatch to Firestore ───
+    if (item?.firestoreId) {
+      try {
+        await updateDoc(doc(db, 'surplus_batches', item.firestoreId), {
+          status: BATCH_STATUS.ACCEPTED_EN_ROUTE,
+          assignedNgo: ngo.name,
+          acceptedByName: ngo.name,
+          acceptedAt: serverTimestamp(),
+          matchedEta: `${ngo.etaMins} mins`,
+        });
+        console.log(`[AnnaSetu] Batch ${item.id} → ACCEPTED_EN_ROUTE by ${ngo.name}`);
+      } catch (err) {
+        console.error('Failed to write dispatch to Firestore:', err);
+      }
+    }
     
     // Simulate progressive status transitions
     setTimeout(() => {

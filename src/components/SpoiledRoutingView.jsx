@@ -1,6 +1,9 @@
 import React, { useState } from 'react';
 import { AlertTriangle, Flame, Leaf, ShieldCheck, ArrowRight, CheckCircle2, Factory, Zap, FileText } from 'lucide-react';
 import { MOCK_BIO_PROCESSORS } from '../data/mockData';
+import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { db } from '../config/firebase';
+import { BATCH_STATUS } from '../constants/statusEnum';
 
 export default function SpoiledRoutingView({ item, onConfirmRouting, onBackToDashboard }) {
   const [selectedFacility, setSelectedFacility] = useState(MOCK_BIO_PROCESSORS[0]);
@@ -10,8 +13,25 @@ export default function SpoiledRoutingView({ item, onConfirmRouting, onBackToDas
   const co2OffsetKg = (quantityKg * selectedFacility.co2ePerKg).toFixed(1);
   const payoutRs = (quantityKg * selectedFacility.biomassPayoutRate).toFixed(1);
 
-  const handleRouteFacility = () => {
+  const handleRouteFacility = async () => {
     setIsRouted(true);
+
+    // ─── Write diversion to Firestore ───
+    if (item?.firestoreId) {
+      try {
+        await updateDoc(doc(db, 'surplus_batches', item.firestoreId), {
+          status: BATCH_STATUS.ACCEPTED_EN_ROUTE,
+          assignedProcessor: selectedFacility.name,
+          acceptedByName: selectedFacility.name,
+          acceptedAt: serverTimestamp(),
+          matchedEta: 'Collected for Bio-CNG',
+        });
+        console.log(`[AnnaSetu] Batch ${item.id} → Diverted to ${selectedFacility.name}`);
+      } catch (err) {
+        console.error('Failed to write diversion to Firestore:', err);
+      }
+    }
+
     if (onConfirmRouting) {
       onConfirmRouting(item, selectedFacility);
     }

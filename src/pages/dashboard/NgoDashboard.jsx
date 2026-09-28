@@ -4,6 +4,9 @@ import { INITIAL_SURPLUS_ITEMS } from '../../data/mockData';
 import { motion } from 'framer-motion';
 
 export default function NgoDashboard() {
+  // Filter to edible items for demo mode
+  const edibleItems = INITIAL_SURPLUS_ITEMS.filter(i => i.verdict === 'EDIBLE');
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -11,10 +14,8 @@ export default function NgoDashboard() {
       transition={{ duration: 0.4 }}
     >
       <NgoRoleView
-        surplusItems={INITIAL_SURPLUS_ITEMS}
-        onScanQrCode={() => {
-          alert('QR Scan Verified! Hand-off completed.');
-        }}
+        surplusItems={edibleItems}
+        isFertilizer={false}
       />
     </motion.div>
   );

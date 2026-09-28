@@ -1,13 +1,19 @@
 import React, { useState } from 'react';
-import { X, Utensils, Camera, Sparkles, ArrowRight, ShieldCheck } from 'lucide-react';
+import { X, Utensils, Camera, Sparkles, ArrowRight, ShieldCheck, IndianRupee, Leaf } from 'lucide-react';
+import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { db } from '../config/firebase';
+import { BATCH_STATUS } from '../constants/statusEnum';
 
 const PRESET_SAMPLES = [
   {
     title: 'Taj Hotel Lunch Surplus (Fresh Paneer & Rice)',
+    foodName: 'Paneer Butter Masala',
     foodType: 'Paneer Butter Masala & Steamed Basmati Rice',
     category: 'Cooked Gravy & Staples',
     quantityKg: 38,
     estimatedPlates: 125,
+    pricing: 0,
+    rawMaterial: 'Paneer, Tomato, Butter, Cream, Basmati Rice, Spices',
     prepTime: 'Today, 11:30 AM',
     ambientTemp: '24°C',
     hotHoldTemp: '68°C',
@@ -16,10 +22,13 @@ const PRESET_SAMPLES = [
   },
   {
     title: 'Banquet Hall Evening Leftovers (Dal Makhani & Roti)',
+    foodName: 'Dal Makhani & Roti',
     foodType: 'Dal Makhani & Tandoori Roti Batch',
     category: 'Lentils & Breads',
     quantityKg: 22,
     estimatedPlates: 75,
+    pricing: 150,
+    rawMaterial: 'Black Urad Dal, Kidney Beans, Butter, Wheat Flour, Ghee',
     prepTime: 'Today, 12:00 PM',
     ambientTemp: '26°C',
     hotHoldTemp: '65°C',
@@ -28,10 +37,13 @@ const PRESET_SAMPLES = [
   },
   {
     title: 'Cut Melon & Dairy Dessert (High-Risk Cold Chain Failure)',
+    foodName: 'Mixed Fruit & Dairy Dessert',
     foodType: 'Cut Melon & Dairy Dessert (High Risk Temp Excursion)',
     category: 'Perishable Dairy & Fruits',
     quantityKg: 28,
     estimatedPlates: 90,
+    pricing: 0,
+    rawMaterial: 'Watermelon, Muskmelon, Milk, Cream, Sugar',
     prepTime: 'Today, 07:30 AM',
     ambientTemp: '33°C',
     hotHoldTemp: '18°C (Cold chain broken)',
@@ -44,32 +56,49 @@ export default function SurplusLogModal({ isOpen, onClose, onSubmitBatch }) {
   if (!isOpen) return null;
 
   const [selectedPreset, setSelectedPreset] = useState(PRESET_SAMPLES[0]);
+  const [foodName, setFoodName] = useState(PRESET_SAMPLES[0].foodName);
   const [foodType, setFoodType] = useState(PRESET_SAMPLES[0].foodType);
   const [category, setCategory] = useState(PRESET_SAMPLES[0].category);
   const [quantityKg, setQuantityKg] = useState(PRESET_SAMPLES[0].quantityKg);
   const [estimatedPlates, setEstimatedPlates] = useState(PRESET_SAMPLES[0].estimatedPlates);
+  const [pricing, setPricing] = useState(PRESET_SAMPLES[0].pricing);
+  const [rawMaterial, setRawMaterial] = useState(PRESET_SAMPLES[0].rawMaterial);
   const [prepTime, setPrepTime] = useState(PRESET_SAMPLES[0].prepTime);
   const [hotHoldTemp, setHotHoldTemp] = useState(PRESET_SAMPLES[0].hotHoldTemp);
   const [photoUrl, setPhotoUrl] = useState(PRESET_SAMPLES[0].photoUrl);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleApplyPreset = (preset) => {
     setSelectedPreset(preset);
+    setFoodName(preset.foodName);
     setFoodType(preset.foodType);
     setCategory(preset.category);
     setQuantityKg(preset.quantityKg);
     setEstimatedPlates(preset.estimatedPlates);
+    setPricing(preset.pricing);
+    setRawMaterial(preset.rawMaterial);
     setPrepTime(preset.prepTime);
     setHotHoldTemp(preset.hotHoldTemp);
     setPhotoUrl(preset.photoUrl);
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
+    setIsSubmitting(true);
+
+    const batchCode = `SUR-${Math.floor(8000 + Math.random() * 1900)}`;
     const newBatch = {
-      id: `SUR-${Math.floor(8000 + Math.random() * 1900)}`,
+      batchCode,
+      // Keep legacy `id` for local state compatibility
+      id: batchCode,
       timestamp: 'Just now',
       kitchenId: 'k1',
       kitchenName: 'Taj Palace Hotel & Convention',
+      // ── New Fields ──
+      foodName,
+      pricing: Number(pricing),
+      rawMaterial,
+      // ── Existing Fields ──
       foodType,
       category,
       quantityKg: Number(quantityKg),
@@ -80,13 +109,34 @@ export default function SurplusLogModal({ isOpen, onClose, onSubmitBatch }) {
       photoUrl,
       verdict: selectedPreset.simulatedVerdict,
       freshnessScore: selectedPreset.simulatedVerdict === 'EDIBLE' ? 94 : 38,
-      status: 'Verifying',
+      status: BATCH_STATUS.PENDING_SCAN,
       fssaiDecayMinutesRemaining: selectedPreset.simulatedVerdict === 'EDIBLE' ? 165 : 0,
       auditHash: `0x${Math.random().toString(16).substring(2, 14)}...${Math.random().toString(16).substring(2, 6)}`,
       qrCodeRef: `AS-2026-FSSAI-${Math.floor(80000 + Math.random() * 10000)}`,
-      co2OffsetKg: (Number(quantityKg) * 2.5).toFixed(1)
+      co2OffsetKg: (Number(quantityKg) * 2.5).toFixed(1),
+      // ── Timestamps ──
+      createdAt: serverTimestamp(),
+      acceptedAt: null,
+      verifiedAt: null,
+      acceptedByUid: null,
+      acceptedByName: null,
+      assignedNgo: null,
+      assignedProcessor: null,
+      matchedEta: null,
     };
-    onSubmitBatch(newBatch);
+
+    let firestoreId = null;
+    try {
+      // Write to Firestore
+      const docRef = await addDoc(collection(db, 'surplus_batches'), newBatch);
+      firestoreId = docRef.id;
+    } catch (err) {
+      console.error('Firestore addDoc failed (continuing with local state):', err);
+    }
+
+    setIsSubmitting(false);
+    // Pass to parent for local state update (preserves existing demo flow)
+    onSubmitBatch({ ...newBatch, firestoreId, createdAt: new Date() });
   };
 
   return (
@@ -146,6 +196,21 @@ export default function SurplusLogModal({ isOpen, onClose, onSubmitBatch }) {
         {/* Form */}
         <form onSubmit={handleSubmit} className="space-y-4 pt-2">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {/* ── NEW: Food Name ── */}
+            <div className="sm:col-span-2">
+              <label className="text-xs font-semibold text-slate-300 flex items-center gap-1">
+                <Utensils className="w-3.5 h-3.5 text-saffron-400" /> Dish / Food Name
+              </label>
+              <input
+                type="text"
+                value={foodName}
+                onChange={(e) => setFoodName(e.target.value)}
+                placeholder="e.g. Paneer Butter Masala"
+                className="w-full mt-1 px-3 py-2 bg-darkbg-900 border border-slate-700 rounded-xl text-white text-xs focus:outline-none focus:border-annagreen-500"
+                required
+              />
+            </div>
+
             <div>
               <label className="text-xs font-semibold text-slate-300">Food Item & Prep Description</label>
               <input
@@ -196,6 +261,25 @@ export default function SurplusLogModal({ isOpen, onClose, onSubmitBatch }) {
               />
             </div>
 
+            {/* ── NEW: Pricing ── */}
+            <div>
+              <label className="text-xs font-semibold text-slate-300 flex items-center gap-1">
+                <IndianRupee className="w-3.5 h-3.5 text-saffron-400" /> Suggested Price (₹)
+              </label>
+              <div className="relative mt-1">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-saffron-400 text-xs font-bold">₹</span>
+                <input
+                  type="number"
+                  value={pricing}
+                  onChange={(e) => setPricing(e.target.value)}
+                  min="0"
+                  placeholder="0 = Free Donation"
+                  className="w-full pl-7 pr-3 py-2 bg-darkbg-900 border border-slate-700 rounded-xl text-white text-xs focus:outline-none focus:border-saffron-500"
+                />
+              </div>
+              <p className="text-[10px] text-slate-500 mt-0.5">Set to 0 for free donation</p>
+            </div>
+
             <div>
               <label className="text-xs font-semibold text-slate-300">Preparation Timestamp</label>
               <input
@@ -214,6 +298,21 @@ export default function SurplusLogModal({ isOpen, onClose, onSubmitBatch }) {
                 onChange={(e) => setHotHoldTemp(e.target.value)}
                 className="w-full mt-1 px-3 py-2 bg-darkbg-900 border border-slate-700 rounded-xl text-white text-xs focus:outline-none focus:border-annagreen-500 font-mono"
               />
+            </div>
+
+            {/* ── NEW: Raw Material / Ingredients ── */}
+            <div className="sm:col-span-2">
+              <label className="text-xs font-semibold text-slate-300 flex items-center gap-1">
+                <Leaf className="w-3.5 h-3.5 text-annagreen-400" /> Raw Materials / Key Ingredients
+              </label>
+              <textarea
+                value={rawMaterial}
+                onChange={(e) => setRawMaterial(e.target.value)}
+                rows={2}
+                placeholder="e.g. Paneer, Tomato, Butter, Cream, Spices"
+                className="w-full mt-1 px-3 py-2 bg-darkbg-900 border border-slate-700 rounded-xl text-white text-xs focus:outline-none focus:border-annagreen-500 resize-none"
+              />
+              <p className="text-[10px] text-slate-500 mt-0.5">Comma-separated ingredients for allergy & content info</p>
             </div>
           </div>
 
@@ -246,10 +345,20 @@ export default function SurplusLogModal({ isOpen, onClose, onSubmitBatch }) {
             </button>
             <button
               type="submit"
-              className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-annagreen-600 to-annagreen-500 hover:from-annagreen-500 hover:to-annagreen-400 text-white font-bold text-xs shadow-lg shadow-annagreen-900/40 ring-1 ring-annagreen-300/30 flex items-center gap-2"
+              disabled={isSubmitting}
+              className={`px-6 py-2.5 rounded-xl bg-gradient-to-r from-annagreen-600 to-annagreen-500 hover:from-annagreen-500 hover:to-annagreen-400 text-white font-bold text-xs shadow-lg shadow-annagreen-900/40 ring-1 ring-annagreen-300/30 flex items-center gap-2 ${isSubmitting ? 'opacity-60 cursor-not-allowed' : ''}`}
             >
-              <ShieldCheck className="w-4 h-4" />
-              Proceed to AI Freshness Scan
+              {isSubmitting ? (
+                <>
+                  <div className="w-4 h-4 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+                  Saving to Firestore...
+                </>
+              ) : (
+                <>
+                  <ShieldCheck className="w-4 h-4" />
+                  Proceed to AI Freshness Scan
+                </>
+              )}
             </button>
           </div>
         </form>
