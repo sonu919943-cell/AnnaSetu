@@ -43,3 +43,7 @@ Desktop.ini
 .env.development.local
 .env.test.local
 .env.production.local
+<<<<<<< Updated upstream
+=======
+package-lock.json
+>>>>>>> Stashed changes
