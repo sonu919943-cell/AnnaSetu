@@ -13,26 +13,27 @@ export const useAuth = () => useContext(AuthContext);
 
 export const AuthProvider = ({ children }) => {
   const [currentUser, setCurrentUser] = useState(null);
-  const [userRole, setUserRole] = useState(null); // 'business', 'ngo', 'super_admin'
+  const [userRole, setUserRole] = useState(null); // 'business', 'ngo', 'fertilizer', 'super_admin'
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
-        setCurrentUser(user);
+        let role = 'business';
         // Fetch user role from Firestore
         try {
           const userDoc = await getDoc(doc(db, 'users', user.uid));
-          if (userDoc.exists()) {
-            setUserRole(userDoc.data().role || 'business');
-          } else {
-            // Default to business if no document exists for some reason
-            setUserRole('business'); 
+          if (userDoc.exists() && userDoc.data()?.role) {
+            role = userDoc.data().role;
           }
         } catch (error) {
           console.error("Error fetching user role:", error);
-          setUserRole('business');
         }
+
+        // Merge role into user object and set currentUser state
+        const mergedUser = Object.assign(user, { role });
+        setCurrentUser(mergedUser);
+        setUserRole(role);
       } else {
         setCurrentUser(null);
         setUserRole(null);
@@ -53,7 +54,7 @@ export const AuthProvider = ({ children }) => {
 
   const value = {
     currentUser,
-    userRole,
+    userRole: currentUser?.role || userRole,
     login,
     logout,
     loading

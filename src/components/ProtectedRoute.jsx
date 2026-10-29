@@ -2,8 +2,8 @@ import React from 'react';
 import { Navigate, Outlet } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 
-export default function ProtectedRoute({ allowedRoles }) {
-  const { currentUser, userRole, loading } = useAuth();
+export default function ProtectedRoute({ children, allowedRoles }) {
+  const { currentUser, loading } = useAuth();
 
   if (loading) {
     return (
@@ -13,17 +13,20 @@ export default function ProtectedRoute({ allowedRoles }) {
     );
   }
 
+  // a) If no currentUser, navigate to /login
   if (!currentUser) {
     return <Navigate to="/login" replace />;
   }
 
-  if (allowedRoles && !allowedRoles.includes(userRole)) {
-    // Redirect to appropriate dashboard if they try to access wrong role page
-    if (userRole === 'ngo') return <Navigate to="/dashboard/ngo" replace />;
-    if (userRole === 'super_admin') return <Navigate to="/dashboard/admin" replace />;
-    if (userRole === 'fertilizer') return <Navigate to="/dashboard/fertilizer" replace />;
+  // b) If allowedRoles is provided but currentUser.role is not in the array, redirect
+  const role = currentUser.role;
+  if (allowedRoles && (!role || !allowedRoles.includes(role))) {
+    if (role === 'ngo') return <Navigate to="/dashboard/ngo" replace />;
+    if (role === 'fertilizer') return <Navigate to="/dashboard/fertilizer" replace />;
+    if (role === 'super_admin') return <Navigate to="/dashboard/admin" replace />;
     return <Navigate to="/dashboard/business" replace />;
   }
 
-  return <Outlet />;
+  // c) Otherwise, return children
+  return children ? children : <Outlet />;
 }

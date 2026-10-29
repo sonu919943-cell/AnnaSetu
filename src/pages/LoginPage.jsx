@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../config/firebase';
 import { Heart, ArrowRight, Lock, Mail, AlertTriangle, Factory } from 'lucide-react';
 import { motion } from 'framer-motion';
 
@@ -18,11 +20,29 @@ export default function LoginPage() {
     try {
       setError('');
       setLoading(true);
-      await login(email, password);
-      
-      // The ProtectedRoute will auto-redirect them to the right dashboard based on their role
-      // We'll just push to a generic dashboard route and let the logic handle it
-      navigate('/dashboard/business');
+      const userCredential = await login(email, password);
+      const user = userCredential.user;
+
+      let destination = '/dashboard/business';
+      try {
+        const userDoc = await getDoc(doc(db, 'users', user.uid));
+        if (userDoc.exists()) {
+          const role = userDoc.data().role;
+          if (role === 'ngo') {
+            destination = '/dashboard/ngo';
+          } else if (role === 'fertilizer') {
+            destination = '/dashboard/fertilizer';
+          } else if (role === 'super_admin') {
+            destination = '/dashboard/admin';
+          } else {
+            destination = '/dashboard/business';
+          }
+        }
+      } catch (roleErr) {
+        console.error('Error fetching user role from database:', roleErr);
+      }
+
+      navigate(destination, { replace: true });
     } catch (err) {
       setError('Failed to log in. Please check your credentials.');
       console.error(err);
