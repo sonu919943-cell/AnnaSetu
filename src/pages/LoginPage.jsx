@@ -1,19 +1,43 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { doc, getDoc } from 'firebase/firestore';
-import { db } from '../config/firebase';
+import { db, auth } from '../config/firebase';
 import { Heart, ArrowRight, Lock, Mail, AlertTriangle, Factory } from 'lucide-react';
 import { motion } from 'framer-motion';
 
+const DEMO_CREDENTIALS = {
+  business: {
+    email: 'business.demo@gmail.com',
+    password: '@hellojudges.annasetu.business'
+  },
+  ngo: {
+    email: 'ngo.demo@gmail.com',
+    password: '@hellojudges.annasetu.ngo'
+  },
+  fertilizer: {
+    email: 'fertilizer.demo@gmail.com',
+    password: '@hellojudges.annasetu.fertilizer'
+  }
+};
+
 export default function LoginPage() {
-  const [activeTab, setActiveTab] = useState('business'); // 'business' or 'ngo'
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [activeTab, setActiveTab] = useState('business'); // 'business' | 'ngo' | 'fertilizer'
+  const [email, setEmail] = useState(DEMO_CREDENTIALS.business.email);
+  const [password, setPassword] = useState(DEMO_CREDENTIALS.business.password);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
-  const { login } = useAuth();
+  const { login, logout } = useAuth();
+
+  // Auto-fill demo credentials and clear errors on tab change
+  useEffect(() => {
+    if (DEMO_CREDENTIALS[activeTab]) {
+      setEmail(DEMO_CREDENTIALS[activeTab].email);
+      setPassword(DEMO_CREDENTIALS[activeTab].password);
+    }
+    setError('');
+  }, [activeTab]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -23,26 +47,41 @@ export default function LoginPage() {
       const userCredential = await login(email, password);
       const user = userCredential.user;
 
-      let destination = '/dashboard/business';
+      let role = 'business';
       try {
         const userDoc = await getDoc(doc(db, 'users', user.uid));
-        if (userDoc.exists()) {
-          const role = userDoc.data().role;
-          if (role === 'ngo') {
-            destination = '/dashboard/ngo';
-          } else if (role === 'fertilizer') {
-            destination = '/dashboard/fertilizer';
-          } else if (role === 'super_admin') {
-            destination = '/dashboard/admin';
-          } else {
-            destination = '/dashboard/business';
-          }
+        if (userDoc.exists() && userDoc.data()?.role) {
+          role = userDoc.data().role;
         }
       } catch (roleErr) {
         console.error('Error fetching user role from database:', roleErr);
       }
 
-      navigate(destination, { replace: true });
+      // a) SUPER ADMIN BYPASS: Immediately navigate to admin regardless of active tab
+      if (role === 'super_admin') {
+        navigate('/dashboard/admin', { replace: true });
+        return;
+      }
+
+      // b) TAB VALIDATION: Enforce strict tab-to-role matching
+      if (activeTab !== role) {
+        if (logout) {
+          await logout();
+        } else {
+          await auth.signOut();
+        }
+        setError('Please log in via the correct organization tab.');
+        return;
+      }
+
+      // c) SUCCESSFUL ROUTING based on verified role
+      if (role === 'ngo') {
+        navigate('/dashboard/ngo', { replace: true });
+      } else if (role === 'fertilizer') {
+        navigate('/dashboard/fertilizer', { replace: true });
+      } else {
+        navigate('/dashboard/business', { replace: true });
+      }
     } catch (err) {
       setError('Failed to log in. Please check your credentials.');
       console.error(err);
@@ -167,8 +206,8 @@ export default function LoginPage() {
           </form>
           
           <div className="mt-6 text-center text-xs text-slate-500">
-            <p>Admin? Please log in via the Business portal.</p>
-            <p className="mt-2 text-annagreen-600">Default demo: Any email/password will work if Firebase is bypassed.</p>
+            <p>Admin? Log in with your Super Admin account from any tab.</p>
+            <p className="mt-2 text-annagreen-600">Demo mode: Credentials auto-populate on tab switch.</p>
           </div>
         </div>
       </motion.div>
